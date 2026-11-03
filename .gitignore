@@ -1,0 +1,19 @@
+# Служебные файлы
+*.log
+Thumbs.db
+.DS_Store
+
+# Секреты и настройки окружения
+.env
+*.key
+
+# Зависимости и сборка
+node_modules/
+dist/
+build/
+__pycache__/
+*.pyc
+
+# Временные файлы
+tmp/
+temp/
