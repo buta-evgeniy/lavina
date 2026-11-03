@@ -1,0 +1,9 @@
+{
+  "name": "lavina-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Лавина - персональный финансовый трекер (single-file app)",
+  "scripts": {
+    "dev": "node server.js"
+  }
+}

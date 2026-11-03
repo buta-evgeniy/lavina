@@ -1,0 +1,1878 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Лавина - Финансовый трекер</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            sand: '#F5F3EE',
+            sanddark: '#EAE6DD',
+            olive: '#6B7A5A',
+            olivedark: '#55634A',
+            graphite: '#3B3B38',
+            graphitesoft: '#6E6E68',
+            beige: '#D8CDBB',
+            warn: '#C9A227',
+            danger: '#B3543F'
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif']
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Inter font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+  <!-- React + Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    body { background-color: #F5F3EE; }
+    .card {
+      background: #FFFFFF;
+      border: 1px solid #EAE6DD;
+      border-radius: 1.25rem;
+      box-shadow: 0 1px 3px rgba(59, 59, 56, 0.05);
+    }
+    .icon-slot svg { width: 100%; height: 100%; }
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    input[type="number"] { -moz-appearance: textfield; }
+    .fade-in { animation: fadeIn 0.35s ease both; }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(6px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="font-sans text-graphite">
+  <div id="root"></div>
+
+  <script id="app-source" type="text/plain">
+    const { useState, useEffect, useMemo } = React;
+
+    /* ===================== КОНСТАНТЫ ===================== */
+
+    const CATEGORIES = [
+      { id: 'auto',      label: 'Авто',        icon: 'car' },
+      { id: 'food',      label: 'Продукты',    icon: 'shopping-basket' },
+      { id: 'med',       label: 'Медицина',    icon: 'heart-pulse' },
+      { id: 'beauty',    label: 'Косметика',   icon: 'sparkles' },
+      { id: 'connect',   label: 'Связь',       icon: 'smartphone' },
+      { id: 'taxes',     label: 'Налоги',      icon: 'landmark' },
+      { id: 'kids',      label: 'Детям',       icon: 'baby' },
+      { id: 'utilities', label: 'ЖКХ',         icon: 'plug-zap' },
+      { id: 'gifts',     label: 'Подарки',     icon: 'gift' },
+      { id: 'transport', label: 'Транспорт',   icon: 'bus' },
+      { id: 'impulse',   label: 'Импульсивно', icon: 'zap' },
+      { id: 'other',     label: 'Другое',      icon: 'shapes' }
+    ];
+
+    const STORAGE = {
+      profile: 'lavina_profile',
+      expenses: 'lavina_expenses',
+      zeroDay: 'lavina_zeroday',
+      goals: 'lavina_goals',
+      phases: 'lavina_phases'
+    };
+
+    const DEFAULT_PROFILE = {
+      income: '',
+      monthlyLimit: '',
+      creditPayments: '',
+      savings: '',
+      sberDebt: '',
+      sberLimit: '',
+      alfaDebt: '',
+      alfaLimit: '',
+      alfaStatus: 'В резерве',
+      creditsTotal: '',
+      cbrRate: '21',
+      credits: [],
+      cards: []
+    };
+
+    /* ===================== УТИЛИТЫ ===================== */
+
+    function num(v) {
+      if (v === null || v === undefined) return 0;
+      const n = parseFloat(String(v).replace(/\s/g, '').replace(',', '.'));
+      return isNaN(n) ? 0 : n;
+    }
+
+    function fmt(n) {
+      return new Intl.NumberFormat('ru-RU').format(Math.round(n)) + ' ₽';
+    }
+
+    function todayStr() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    function monthKey() {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0');
+    }
+
+    function daysInMonth() {
+      const d = new Date();
+      return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    }
+
+    function monthLabel() {
+      return new Date().toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+    }
+
+    function plural(n, one, few, many) {
+      const m = Math.abs(n) % 100;
+      const d = m % 10;
+      if (m > 10 && m < 20) return many;
+      if (d > 1 && d < 5) return few;
+      if (d === 1) return one;
+      return many;
+    }
+
+    function fmtDateRu(iso) {
+      if (!iso) return '';
+      const parts = iso.split('-');
+      if (parts.length !== 3) return iso;
+      return parts[2] + '.' + parts[1] + '.' + parts[0];
+    }
+
+    function daysAgoISO(n) {
+      const d = new Date();
+      d.setDate(d.getDate() - n);
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    }
+
+    function loadJSON(key, fallback) {
+      try {
+        const raw = localStorage.getItem(key);
+        return raw ? JSON.parse(raw) : fallback;
+      } catch (e) {
+        return fallback;
+      }
+    }
+
+    // Переносит старые жесткие поля карт (sber/alfa) в динамический список карт
+    function migrateProfile(prof) {
+      if (!prof) return prof;
+      const p = { ...prof };
+      if (!Array.isArray(p.cards) || p.cards.length === 0) {
+        const cards = [];
+        if (num(p.sberLimit) > 0 || num(p.sberDebt) > 0) {
+          cards.push({ name: 'Кредитка 1', debt: String(p.sberDebt || ''), limit: String(p.sberLimit || ''), status: '' });
+        }
+        if (num(p.alfaLimit) > 0 || num(p.alfaDebt) > 0) {
+          cards.push({ name: 'Кредитка 2', debt: String(p.alfaDebt || ''), limit: String(p.alfaLimit || ''), status: p.alfaStatus || '' });
+        }
+        p.cards = cards;
+      }
+      return p;
+    }
+
+    function Icon({ name, className }) {
+      return <i data-lucide={name} className={className}></i>;
+    }
+
+    /* ===================== МОДАЛЬНОЕ ОКНО НАСТРОЕК / ОНБОРДИНГ ===================== */
+
+    function SettingsModal({ profile, isOnboarding, onSave, onClose, onReset }) {
+      const [form, setForm] = useState({ ...DEFAULT_PROFILE, ...profile });
+
+      function field(key, label, hint, placeholder) {
+        return (
+          <div key={key}>
+            <label className="block text-sm font-medium text-graphite mb-1">{label}</label>
+            {hint && <p className="text-xs text-graphitesoft mb-1">{hint}</p>}
+            <input
+              type="number"
+              min="0"
+              value={form[key]}
+              placeholder={placeholder || '0'}
+              onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+              className="w-full rounded-xl border border-sanddark bg-sand px-4 py-2.5 text-graphite focus:outline-none focus:ring-2 focus:ring-olive/40"
+            />
+          </div>
+        );
+      }
+
+      return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-graphite/40 backdrop-blur-sm p-4">
+          <div className="card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 fade-in">
+            {isOnboarding ? (
+              <div className="mb-5">
+                <h2 className="text-2xl font-bold text-graphite">Добро пожаловать в «Лавину»</h2>
+                <p className="text-sm text-graphitesoft mt-2 leading-relaxed">
+                  Это твой личный финансовый трекер. Чтобы начать, введи свои базовые цифры.
+                  Все данные хранятся только на этом устройстве, их можно изменить в любой момент через шестеренку в шапке.
+                </p>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between mb-5">
+                <h2 className="text-xl font-bold text-graphite">Настройки</h2>
+                <button onClick={onClose} className="p-2 rounded-full hover:bg-sand transition">
+                  <Icon name="x" className="w-5 h-5 block" />
+                </button>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-olive mb-2">Доходы и лимиты</p>
+                <div className="space-y-3">
+                  {field('income', 'Доход в месяц, ₽', 'Зарплата и другие поступления', '200000')}
+                  {field('monthlyLimit', 'Лимит на жизнь в месяц, ₽', 'Еда, ЖКХ, быт. Дневной лимит посчитается сам', '75000')}
+                  {field('creditPayments', 'Обязательные платежи в месяц, ₽', 'Кредиты, рассрочки, курсы', '67230')}
+                  {field('savings', 'Есть сегодня в накоплениях, ₽', 'Подушка, кубышка, вклады - все свободные накопления', '50000')}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-olive mb-2">Мои карты</p>
+                <p className="text-xs text-graphitesoft mb-2">Название, текущий долг, лимит и статус. Карт может быть сколько угодно.</p>
+                {(Array.isArray(form.cards) ? form.cards : []).map((c, i) => (
+                  <div key={i} className="rounded-xl border border-sanddark bg-sand p-3 mb-2 space-y-2">
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        value={c.name || ''}
+                        placeholder={'Название карты ' + (i + 1)}
+                        onChange={(e) => {
+                          const next = form.cards.slice();
+                          next[i] = { ...next[i], name: e.target.value };
+                          setForm({ ...form, cards: next });
+                        }}
+                        className="flex-1 min-w-0 rounded-xl border border-sanddark bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, cards: form.cards.filter((_, j) => j !== i) })}
+                        className="p-2 rounded-full text-graphitesoft hover:text-danger hover:bg-danger/10 transition shrink-0"
+                        title="Удалить карту"
+                      >
+                        <Icon name="trash-2" className="w-4 h-4 block" />
+                      </button>
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        min="0"
+                        value={c.debt || ''}
+                        placeholder="Долг, ₽"
+                        onChange={(e) => {
+                          const next = form.cards.slice();
+                          next[i] = { ...next[i], debt: e.target.value };
+                          setForm({ ...form, cards: next });
+                        }}
+                        className="flex-1 min-w-0 rounded-xl border border-sanddark bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        value={c.limit || ''}
+                        placeholder="Лимит, ₽"
+                        onChange={(e) => {
+                          const next = form.cards.slice();
+                          next[i] = { ...next[i], limit: e.target.value };
+                          setForm({ ...form, cards: next });
+                        }}
+                        className="flex-1 min-w-0 rounded-xl border border-sanddark bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={c.status || ''}
+                      placeholder="Статус (например: заморожена под Новый Год)"
+                      onChange={(e) => {
+                        const next = form.cards.slice();
+                        next[i] = { ...next[i], status: e.target.value };
+                        setForm({ ...form, cards: next });
+                      }}
+                      className="w-full rounded-xl border border-sanddark bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                    />
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, cards: [...(Array.isArray(form.cards) ? form.cards : []), { name: '', debt: '', limit: '', status: '' }] })}
+                  className="flex items-center gap-2 text-sm font-semibold text-olive hover:text-olivedark transition"
+                >
+                  <Icon name="circle-plus" className="w-4 h-4 block" />
+                  Добавить карту
+                </button>
+              </div>
+
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-olive mb-2">Кредиты и макро</p>
+                <div className="space-y-3">
+                  {field('creditsTotal', 'Сумма потребительских кредитов, ₽', 'Общий остаток долга по всем кредитам', '1200000')}
+                  {field('cbrRate', 'Ключевая ставка ЦБ, %', 'Используется умным советником', '21')}
+                </div>
+
+                <div className="mt-4">
+                  <p className="text-sm font-medium text-graphite mb-1">Мои кредиты (для анализа рефинансирования)</p>
+                  <p className="text-xs text-graphitesoft mb-2">Название, ставка и ежемесячный платеж по каждому кредиту</p>
+                  {(Array.isArray(form.credits) ? form.credits : []).map((c, i) => (
+                    <div key={i} className="flex gap-2 mb-2">
+                      <input
+                        type="text"
+                        value={c.name || ''}
+                        placeholder="Название"
+                        onChange={(e) => {
+                          const next = form.credits.slice();
+                          next[i] = { ...next[i], name: e.target.value };
+                          setForm({ ...form, credits: next });
+                        }}
+                        className="flex-1 min-w-0 rounded-xl border border-sanddark bg-sand px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.1"
+                        value={c.rate || ''}
+                        placeholder="Ставка %"
+                        title="Ставка, %"
+                        onChange={(e) => {
+                          const next = form.credits.slice();
+                          next[i] = { ...next[i], rate: e.target.value };
+                          setForm({ ...form, credits: next });
+                        }}
+                        className="w-20 rounded-xl border border-sanddark bg-sand px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                      />
+                      <input
+                        type="number"
+                        min="0"
+                        value={c.payment || ''}
+                        placeholder="Платеж ₽"
+                        title="Платеж в месяц, ₽"
+                        onChange={(e) => {
+                          const next = form.credits.slice();
+                          next[i] = { ...next[i], payment: e.target.value };
+                          setForm({ ...form, credits: next });
+                        }}
+                        className="w-24 rounded-xl border border-sanddark bg-sand px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, credits: form.credits.filter((_, j) => j !== i) })}
+                        className="p-2 rounded-full text-graphitesoft hover:text-danger hover:bg-danger/10 transition shrink-0"
+                        title="Удалить кредит"
+                      >
+                        <Icon name="trash-2" className="w-4 h-4 block" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, credits: [...(Array.isArray(form.credits) ? form.credits : []), { name: '', rate: '', payment: '' }] })}
+                    className="flex items-center gap-2 text-sm font-semibold text-olive hover:text-olivedark transition"
+                  >
+                    <Icon name="circle-plus" className="w-4 h-4 block" />
+                    Добавить кредит
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 mt-6">
+              <button
+                onClick={() => onSave(form)}
+                className="w-full rounded-xl bg-olive hover:bg-olivedark text-white font-semibold py-3 transition"
+              >
+                {isOnboarding ? 'Начать работу' : 'Сохранить'}
+              </button>
+              {!isOnboarding && (
+                <button
+                  onClick={onReset}
+                  className="w-full rounded-xl border border-danger/30 text-danger text-sm py-2.5 hover:bg-danger/5 transition"
+                >
+                  Сбросить все данные приложения
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /* ===================== КРУГОВОЙ ИНДИКАТОР ДНЕВНОГО ЛИМИТА ===================== */
+
+    function DailyRing({ spent, target, zeroDay }) {
+      const size = 168;
+      const stroke = 12;
+      const r = (size - stroke) / 2;
+      const c = 2 * Math.PI * r;
+      const ratio = target > 0 ? Math.min(spent / target, 1) : 1;
+      const remaining = zeroDay ? 0 : target - spent;
+
+      let color = '#6B7A5A'; // зеленый
+      if (zeroDay || remaining < 0) color = '#B3543F'; // красный
+      else if (remaining < 700) color = '#C9A227'; // желтый
+
+      return (
+        <div className="flex flex-col items-center">
+          <svg width={size} height={size} className="-rotate-90">
+            <circle cx={size / 2} cy={size / 2} r={r} stroke="#EAE6DD" strokeWidth={stroke} fill="none" />
+            <circle
+              cx={size / 2} cy={size / 2} r={r}
+              stroke={color} strokeWidth={stroke} fill="none"
+              strokeLinecap="round"
+              strokeDasharray={c}
+              strokeDashoffset={c * (1 - ratio)}
+              style={{ transition: 'stroke-dashoffset 0.5s ease, stroke 0.3s ease' }}
+            />
+          </svg>
+          <div className="absolute flex flex-col items-center justify-center" style={{ width: size, height: size }}>
+            <span className="text-xs uppercase tracking-wide text-graphitesoft">Осталось сегодня</span>
+            <span className="text-3xl font-extrabold mt-1" style={{ color }}>{fmt(Math.max(remaining, 0))}</span>
+            <span className="text-xs text-graphitesoft mt-1">из {fmt(target)}</span>
+          </div>
+        </div>
+      );
+    }
+
+    /* ===================== ВИДЖЕТ КАРТ ===================== */
+
+    function BankCard({ title, icon, debt, limit, extra, accent }) {
+      const free = Math.max(limit - debt, 0);
+      const pct = limit > 0 ? Math.min((debt / limit) * 100, 100) : 0;
+      return (
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="icon-slot w-5 h-5 text-olive"><Icon name={icon} className="w-5 h-5 block" /></span>
+            <h3 className="font-semibold text-graphite">{title}</h3>
+          </div>
+          <div className="flex items-end justify-between mb-2">
+            <span className="text-2xl font-bold">{fmt(debt)}</span>
+            <span className="text-sm text-graphitesoft">из {fmt(limit)}</span>
+          </div>
+          <div className="w-full h-2.5 rounded-full bg-sanddark overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: pct + '%', backgroundColor: accent || '#6B7A5A' }}
+            ></div>
+          </div>
+          <p className="text-sm text-graphitesoft mt-2">Свободно: <span className="font-semibold text-graphite">{fmt(free)}</span></p>
+          {extra && <p className="text-xs text-olive mt-2 leading-relaxed">{extra}</p>}
+        </div>
+      );
+    }
+
+    /* ===================== АНАЛИТИКА: МЕСЯЦ / ГОД ===================== */
+
+    const MONTH_NAMES_SHORT = ['Янв', 'Фев', 'Мар', 'Апр', 'Май', 'Июн', 'Июл', 'Авг', 'Сен', 'Окт', 'Ноя', 'Дек'];
+
+    function Analytics({ expenses, monthlyLimit }) {
+      const [offset, setOffset] = useState(0);   // 0 = текущий месяц, -1 = прошлый и т.д.
+      const [mode, setMode] = useState('month'); // 'month' | 'year'
+
+      const ref = new Date();
+      ref.setDate(1);
+      ref.setMonth(ref.getMonth() + offset);
+      const y = ref.getFullYear();
+      const m = ref.getMonth();
+      const mKey = y + '-' + String(m + 1).padStart(2, '0');
+      const label = ref.toLocaleDateString('ru-RU', { month: 'long', year: 'numeric' });
+
+      const spends = useMemo(() => expenses.filter((e) => e.type !== 'refund'), [expenses]);
+      const monthExp = useMemo(() => spends.filter((e) => e.date.startsWith(mKey)), [spends, mKey]);
+      const yearExp = useMemo(() => spends.filter((e) => e.date.startsWith(String(y) + '-')), [spends, y]);
+
+      function aggregate(list) {
+        const map = {};
+        CATEGORIES.forEach((c) => { map[c.id] = 0; });
+        list.forEach((e) => { map[e.category] = (map[e.category] || 0) + e.amount; });
+        return map;
+      }
+
+      function CategoryBars({ list, total, withLimitWarnings }) {
+        const byCategory = aggregate(list);
+        return (
+          <div className="space-y-3">
+            {CATEGORIES.map((cat) => {
+              const sum = byCategory[cat.id] || 0;
+              if (sum === 0 && list.length > 0) return null;
+              const pct = total > 0 ? (sum / total) * 100 : 0;
+              const pctOfLimit = monthlyLimit > 0 ? (sum / monthlyLimit) * 100 : 0;
+              let barColor = '#6B7A5A';
+              let textColor = 'text-graphite';
+              if (withLimitWarnings && monthlyLimit > 0) {
+                if (pctOfLimit > 35) { barColor = '#B3543F'; textColor = 'text-danger'; }
+                else if (pctOfLimit > 20) { barColor = '#C9A227'; textColor = 'text-warn'; }
+              }
+              return (
+                <div key={cat.id}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className={'font-medium ' + textColor}>
+                      {cat.label}
+                      {withLimitWarnings && pctOfLimit > 20 && (
+                        <span className="ml-2 text-xs font-semibold uppercase">внимание: {pctOfLimit.toFixed(0)}% лимита</span>
+                      )}
+                    </span>
+                    <span className={'font-semibold ' + textColor}>{fmt(sum)}</span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-sanddark overflow-hidden">
+                    <div
+                      className="h-full rounded-full transition-all duration-500"
+                      style={{ width: Math.min(pct, 100) + '%', backgroundColor: barColor }}
+                    ></div>
+                  </div>
+                  <p className="text-xs text-graphitesoft mt-0.5">{pct.toFixed(1)}% от трат периода</p>
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+
+      const monthTotal = monthExp.reduce((s, e) => s + e.amount, 0);
+      const yearTotal = yearExp.reduce((s, e) => s + e.amount, 0);
+      const impulse = aggregate(monthExp)['impulse'] || 0;
+
+      // Помесячные суммы года
+      const yearByMonth = [];
+      for (let i = 0; i < 12; i++) {
+        const k = y + '-' + String(i + 1).padStart(2, '0');
+        const sum = yearExp.filter((e) => e.date.startsWith(k)).reduce((s, e) => s + e.amount, 0);
+        yearByMonth.push({ name: MONTH_NAMES_SHORT[i], sum });
+      }
+      const yearMax = Math.max(...yearByMonth.map((x) => x.sum), 1);
+
+      return (
+        <div className="card p-5">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
+            <span className="icon-slot w-5 h-5 text-olive"><Icon name="chart-pie" className="w-5 h-5 block" /></span>
+            <h3 className="font-semibold text-graphite">Аналитика</h3>
+
+            <div className="ml-auto flex items-center gap-2">
+              <div className="flex rounded-full border border-sanddark overflow-hidden">
+                <button
+                  onClick={() => setMode('month')}
+                  className={'px-3 py-1.5 text-xs font-semibold transition ' + (mode === 'month' ? 'bg-olive text-white' : 'bg-white text-graphitesoft')}
+                >
+                  Месяц
+                </button>
+                <button
+                  onClick={() => setMode('year')}
+                  className={'px-3 py-1.5 text-xs font-semibold transition ' + (mode === 'year' ? 'bg-olive text-white' : 'bg-white text-graphitesoft')}
+                >
+                  Год
+                </button>
+              </div>
+              <button
+                onClick={() => setOffset(offset - 1)}
+                className="p-1.5 rounded-full border border-sanddark text-graphitesoft hover:bg-sanddark/40 transition"
+                title="Предыдущий период"
+              >
+                <Icon name="chevron-left" className="w-4 h-4 block" />
+              </button>
+              <span className="text-sm font-medium text-graphite min-w-[110px] text-center">
+                {mode === 'month' ? label : y + ' год'}
+              </span>
+              <button
+                onClick={() => setOffset(Math.min(offset + 1, 0))}
+                disabled={offset === 0}
+                className={'p-1.5 rounded-full border border-sanddark transition ' + (offset === 0 ? 'text-sanddark cursor-default' : 'text-graphitesoft hover:bg-sanddark/40')}
+                title="Следующий период"
+              >
+                <Icon name="chevron-right" className="w-4 h-4 block" />
+              </button>
+            </div>
+          </div>
+
+          {mode === 'month' ? (
+            <div>
+              <p className="text-sm text-graphitesoft mb-3">
+                Потрачено за период: <b className="text-graphite">{fmt(monthTotal)}</b>
+                {monthlyLimit > 0 && <span> из лимита {fmt(monthlyLimit)}</span>}
+              </p>
+              <CategoryBars list={monthExp} total={monthTotal} withLimitWarnings={true} />
+              <div className="mt-5 space-y-2">
+                {impulse > 0 && (
+                  <div className="flex items-start gap-2 rounded-xl bg-danger/10 border border-danger/30 px-4 py-3">
+                    <span className="icon-slot w-4 h-4 mt-0.5 text-danger shrink-0"><Icon name="zap" className="w-4 h-4 block" /></span>
+                    <p className="text-sm text-graphite">
+                      На импульсивные покупки ушло <b>{fmt(impulse)}</b>
+                      {monthlyLimit > 0 && <span> ({((impulse / monthlyLimit) * 100).toFixed(1)}% от бюджета)</span>}
+                    </p>
+                  </div>
+                )}
+                {monthTotal === 0 && (
+                  <p className="text-sm text-graphitesoft">Трат за этот месяц нет.</p>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div>
+              <p className="text-sm text-graphitesoft mb-3">
+                Потрачено за {y} год: <b className="text-graphite">{fmt(yearTotal)}</b>
+              </p>
+
+              <p className="text-xs font-semibold uppercase tracking-wide text-olive mb-2">По месяцам</p>
+              <div className="space-y-2 mb-5">
+                {yearByMonth.map((row, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <span className="text-xs text-graphitesoft w-8 shrink-0">{row.name}</span>
+                    <div className="flex-1 h-2 rounded-full bg-sanddark overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-500"
+                        style={{ width: (row.sum / yearMax) * 100 + '%', backgroundColor: '#6B7A5A' }}
+                      ></div>
+                    </div>
+                    <span className="text-xs font-semibold text-graphite w-20 text-right shrink-0">
+                      {row.sum > 0 ? fmt(row.sum) : '-'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs font-semibold uppercase tracking-wide text-olive mb-2">По категориям за год</p>
+              <CategoryBars list={yearExp} total={yearTotal} withLimitWarnings={false} />
+              {yearTotal === 0 && (
+                <p className="text-sm text-graphitesoft mt-3">Трат за этот год нет.</p>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /* ===================== УМНАЯ ПЛАШКА: СКОРОСТЬ ТРАТ ===================== */
+
+    function SmartAdvice({ monthSpent, monthlyLimit }) {
+      if (monthlyLimit <= 0) return null;
+
+      const dayOfMonth = new Date().getDate();
+      const totalDays = daysInMonth();
+      const daysLeftInMonth = totalDays - dayOfMonth;
+      const monthRemaining = monthlyLimit - monthSpent;
+
+      let tone, icon, text;
+
+      if (monthSpent === 0) {
+        tone = 'ok';
+        icon = 'leaf';
+        text = 'Месяц начался, трат пока нет. Отличный момент, чтобы задать себе спокойный темп!';
+      } else if (monthRemaining <= 0) {
+        tone = 'bad';
+        icon = 'octagon-alert';
+        text = 'Лимит на месяц исчерпан полностью. Включаем режим «Тишина»: только обязательные траты до конца месяца.';
+      } else {
+        const avgDaily = monthSpent / dayOfMonth;
+        const daysUntilEmpty = Math.floor(monthRemaining / avgDaily);
+        if (daysUntilEmpty < daysLeftInMonth) {
+          tone = 'warn';
+          icon = 'triangle-alert';
+          text = 'Внимание! С такой скоростью лимит закончится через ' + daysUntilEmpty + ' ' +
+            plural(daysUntilEmpty, 'день', 'дня', 'дней') +
+            ', а до конца месяца еще ' + (daysLeftInMonth + 1) + ' ' +
+            plural(daysLeftInMonth + 1, 'день', 'дня', 'дней') +
+            '. Включите режим «Тишина» и притормозите траты.';
+        } else {
+          tone = 'ok';
+          icon = 'circle-check';
+          text = 'Отличный темп! Вы идете четко по скандинавскому плану: на каждый оставшийся день месяца есть примерно ' +
+            fmt(monthRemaining / (daysLeftInMonth + 1)) + '.';
+        }
+      }
+
+      const styles = {
+        ok:   { bg: 'bg-olive/10 border-olive/30',   iconColor: 'text-olive' },
+        warn: { bg: 'bg-warn/10 border-warn/40',     iconColor: 'text-warn' },
+        bad:  { bg: 'bg-danger/10 border-danger/40', iconColor: 'text-danger' }
+      };
+      const s = styles[tone];
+
+      return (
+        <div className={'rounded-2xl border px-5 py-4 flex items-start gap-3 ' + s.bg}>
+          <span className={'icon-slot w-5 h-5 mt-0.5 shrink-0 ' + s.iconColor}>
+            <Icon name={icon} className="w-5 h-5 block" />
+          </span>
+          <p className="text-sm leading-relaxed text-graphite">{text}</p>
+        </div>
+      );
+    }
+
+    /* ===================== МОИ ФИНАНСОВЫЕ ЦЕЛИ ===================== */
+
+    const GOAL_TABS = [
+      { id: 'month',   label: '1 месяц',   hint: 'Краткосрочные: удержать лимит, режим дисциплины' },
+      { id: 'quarter', label: '3 месяца',  hint: 'Среднесрочные: закрыть микрозаем, собрать мини-подушку' },
+      { id: 'year',    label: '1 год',     hint: 'Долгосрочные: уничтожить дорогой кредит, накопить на большое' }
+    ];
+
+    function Goals({ goals, setGoals }) {
+      const [tab, setTab] = useState('month');
+      const [showForm, setShowForm] = useState(false);
+      const [text, setText] = useState('');
+      const [deadline, setDeadline] = useState('');
+
+      const visible = goals.filter((g) => g.horizon === tab);
+      const doneCount = visible.filter((g) => g.done).length;
+
+      function addGoal() {
+        const t = text.trim();
+        if (!t) return;
+        setGoals([{ id: Date.now(), horizon: tab, text: t, deadline, done: false }, ...goals]);
+        setText('');
+        setDeadline('');
+        setShowForm(false);
+      }
+
+      function toggleGoal(id) {
+        setGoals(goals.map((g) => (g.id === id ? { ...g, done: !g.done } : g)));
+      }
+
+      function removeGoal(id) {
+        setGoals(goals.filter((g) => g.id !== id));
+      }
+
+      const activeTab = GOAL_TABS.find((t) => t.id === tab);
+
+      return (
+        <section className="card p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="icon-slot w-5 h-5 text-olive"><Icon name="target" className="w-5 h-5 block" /></span>
+            <h3 className="font-semibold text-graphite">Мои Финансовые Цели</h3>
+            <span className="ml-auto text-xs text-graphitesoft">
+              {visible.length > 0 ? 'выполнено ' + doneCount + ' из ' + visible.length : ''}
+            </span>
+          </div>
+          <p className="text-xs text-graphitesoft mb-4">{activeTab.hint}</p>
+
+          <div className="flex gap-2 mb-4">
+            {GOAL_TABS.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => { setTab(t.id); setShowForm(false); }}
+                className={
+                  'px-4 py-2 rounded-full text-sm font-medium border transition ' +
+                  (tab === t.id
+                    ? 'bg-olive text-white border-olive'
+                    : 'bg-white border-sanddark text-graphitesoft hover:border-olive/50')
+                }
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {visible.length === 0 && !showForm && (
+            <p className="text-sm text-graphitesoft py-2">
+              Целей на этот срок пока нет. Добавь первую - маленькие шаги решают.
+            </p>
+          )}
+
+          <ul className="space-y-2">
+            {visible.map((g) => (
+              <li
+                key={g.id}
+                className={
+                  'flex items-center gap-3 rounded-xl border px-4 py-3 transition ' +
+                  (g.done ? 'border-olive/30 bg-olive/5' : 'border-sanddark bg-white')
+                }
+              >
+                <button
+                  onClick={() => toggleGoal(g.id)}
+                  className={
+                    'w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition ' +
+                    (g.done ? 'bg-olive border-olive text-white' : 'border-sanddark hover:border-olive')
+                  }
+                  title={g.done ? 'Снять отметку' : 'Отметить выполненной'}
+                >
+                  {g.done && <Icon name="check" className="w-3.5 h-3.5 block" />}
+                </button>
+                <div className="min-w-0">
+                  <p className={'text-sm font-medium ' + (g.done ? 'line-through text-graphitesoft' : 'text-graphite')}>
+                    {g.text}
+                  </p>
+                  {g.deadline && (
+                    <p className="text-xs text-graphitesoft mt-0.5">
+                      Дедлайн: {fmtDateRu(g.deadline)}
+                    </p>
+                  )}
+                </div>
+                <button
+                  onClick={() => removeGoal(g.id)}
+                  className="ml-auto p-1.5 rounded-full text-graphitesoft hover:text-danger hover:bg-danger/10 transition shrink-0"
+                  title="Удалить цель"
+                >
+                  <Icon name="trash-2" className="w-4 h-4 block" />
+                </button>
+              </li>
+            ))}
+          </ul>
+
+          {showForm ? (
+            <div className="mt-3 rounded-xl border border-sanddark bg-sand p-4 space-y-3 fade-in">
+              <input
+                type="text"
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                placeholder="Текст цели, например: удержать лимит жизни"
+                className="w-full rounded-xl border border-sanddark bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+              />
+              <div>
+                <label className="block text-xs text-graphitesoft mb-1">Дедлайн (необязательно)</label>
+                <input
+                  type="date"
+                  value={deadline}
+                  onChange={(e) => setDeadline(e.target.value)}
+                  className="rounded-xl border border-sanddark bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={addGoal}
+                  className="rounded-xl bg-olive hover:bg-olivedark text-white text-sm font-semibold px-5 py-2.5 transition"
+                >
+                  Сохранить цель
+                </button>
+                <button
+                  onClick={() => setShowForm(false)}
+                  className="rounded-xl border border-sanddark text-sm px-5 py-2.5 text-graphitesoft hover:bg-sanddark/40 transition"
+                >
+                  Отмена
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowForm(true)}
+              className="mt-3 flex items-center gap-2 text-sm font-semibold text-olive hover:text-olivedark transition"
+            >
+              <Icon name="circle-plus" className="w-5 h-5 block" />
+              Добавить цель
+            </button>
+          )}
+        </section>
+      );
+    }
+
+    /* ===================== ВЕРДИКТ ФИН-СОВЕТНИКА ===================== */
+
+    function VerdictBanner({ todaySpent, dayTarget, hasRefundToday }) {
+      let text, icon, tone;
+      const remaining = dayTarget - todaySpent;
+      if (hasRefundToday) {
+        tone = 'ok';
+        icon = 'heart-handshake';
+        text = 'Красавец! Деньги вернулись на карту, свободный лимит дышит легче. Запри наличные под замок!';
+      } else if (remaining < 0) {
+        tone = 'bad';
+        icon = 'octagon-alert';
+        text = 'Так, стоп! Суммы трат огромные, мы сейчас идем по самому краю. Снимай розовые очки и завязывай со спонтанными тратами!';
+      } else if (todaySpent < 1000) {
+        tone = 'ok';
+        icon = 'target';
+        text = 'Дружище, ты сегодня просто тигр! Удержал лимит, сэкономил кэш в кубышку, так держать!';
+      } else {
+        tone = 'warn';
+        icon = 'scale';
+        text = 'Идем по плану, но без фанатизма: следи за остатком дня и не давай мелким тратам съесть лимит.';
+      }
+
+      const styles = {
+        ok:   { bg: 'bg-olive/10 border-olive/30',   iconColor: 'text-olive',   label: 'Вердикт: все под контролем' },
+        warn: { bg: 'bg-warn/10 border-warn/40',     iconColor: 'text-warn',   label: 'Вердикт: держим баланс' },
+        bad:  { bg: 'bg-danger/10 border-danger/40', iconColor: 'text-danger', label: 'Вердикт: стоп-сигнал' }
+      };
+      const s = styles[tone];
+
+      return (
+        <div className={'rounded-2xl border px-5 py-4 ' + s.bg}>
+          <p className={'text-xs font-semibold uppercase tracking-wide mb-1 ' + s.iconColor}>{s.label}</p>
+          <div className="flex items-start gap-3">
+            <span className={'icon-slot w-5 h-5 mt-0.5 shrink-0 ' + s.iconColor}>
+              <Icon name={icon} className="w-5 h-5 block" />
+            </span>
+            <p className="text-sm leading-relaxed text-graphite">{text}</p>
+          </div>
+        </div>
+      );
+    }
+
+    /* ===================== ЧТО ДЕЛАЕМ ЗАВТРА ===================== */
+
+    function TomorrowPlan({ todaySpent, dayTarget, zeroDay }) {
+      let text;
+      if (zeroDay) {
+        text = 'Шикарно отдохнули! Завтра плановый рабочий день, лимит возвращается к базовым ' + fmt(dayTarget) + '. Без фанатизма!';
+      } else if (dayTarget > 0 && todaySpent > dayTarget) {
+        text = 'Поскольку сегодня мы знатно потратились, завтра включаем ЖЕСТКИЙ ЭНЕРГОСБЕРЕГАЮЩИЙ РЕЖИМ. Цель на завтра - строго 0 рублей!';
+      } else {
+        text = 'Завтра обычный день: держим базовый лимит ' + fmt(dayTarget) + ' и не забываем про цели.';
+      }
+
+      return (
+        <div className="card p-5 flex items-start gap-3">
+          <span className="icon-slot w-5 h-5 mt-0.5 text-olive shrink-0"><Icon name="calendar-clock" className="w-5 h-5 block" /></span>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-olive mb-1">Что делаем завтра?</p>
+            <p className="text-sm leading-relaxed text-graphite">{text}</p>
+          </div>
+        </div>
+      );
+    }
+
+    /* ===================== АЧИВКИ ===================== */
+
+    function Achievements({ expenses, zeroDay, todaySpent }) {
+      const weekAgo = daysAgoISO(6);
+      const weekExpenses = expenses.filter((e) => e.date >= weekAgo);
+      const noImpulseWeek = weekExpenses.length > 0 && !weekExpenses.some((e) => (e.category === 'impulse' || e.category === 'other') && e.type !== 'refund');
+      const hasRefund = expenses.some((e) => e.type === 'refund');
+      const hasAutoRepair = expenses.some((e) => e.category === 'auto' && e.type !== 'refund' && e.amount >= 5000);
+      const steelDay = zeroDay && todaySpent === 0;
+
+      const medals = [
+        { id: 'steel',   name: 'Стальной Огурец',     icon: 'crown',          earned: steelDay,      hint: 'Закрой день с чистым расходом 0 ₽ в режиме «День 0»' },
+        { id: 'surgeon', name: 'Финансовый Хирург',   icon: 'stethoscope',    earned: hasRefund,     hint: 'Оформи возврат денег обратно на карту' },
+        { id: 'storm',   name: 'Гроза КБ',            icon: 'shield-check',   earned: noImpulseWeek, hint: 'Неделя без трат в категории «Другое»' },
+        { id: 'guard',   name: 'Защитник Гранаты',    icon: 'wrench',         earned: hasAutoRepair, hint: 'Вложись в критический ремонт авто (от 5 000 ₽), чтобы не попасть на дорогой' }
+      ];
+
+      const earnedCount = medals.filter((m) => m.earned).length;
+
+      return (
+        <section className="card p-5">
+          <div className="flex items-center gap-2 mb-4">
+            <span className="icon-slot w-5 h-5 text-olive"><Icon name="medal" className="w-5 h-5 block" /></span>
+            <h3 className="font-semibold text-graphite">Мои Ачивки</h3>
+            <span className="ml-auto text-xs text-graphitesoft">{earnedCount} из {medals.length}</span>
+          </div>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {medals.map((m) => (
+              <div
+                key={m.id}
+                className={
+                  'flex items-start gap-3 rounded-xl border px-4 py-3 transition ' +
+                  (m.earned ? 'border-olive/40 bg-olive/5' : 'border-sanddark bg-sand/50 opacity-60')
+                }
+                title={m.hint}
+              >
+                <span className={'icon-slot w-8 h-8 rounded-full flex items-center justify-center shrink-0 ' + (m.earned ? 'bg-olive text-white' : 'bg-sanddark text-graphitesoft')}>
+                  <Icon name={m.icon} className="w-4 h-4 block mx-auto my-auto" />
+                </span>
+                <div className="min-w-0">
+                  <p className={'text-sm font-semibold ' + (m.earned ? 'text-olive' : 'text-graphitesoft')}>
+                    {m.name}
+                    {m.earned && <span className="ml-2 text-xs font-normal">получена!</span>}
+                  </p>
+                  <p className="text-xs text-graphitesoft mt-0.5 leading-relaxed">{m.hint}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      );
+    }
+
+    /* ===================== AI-СОВЕТНИК (МАКРО) ===================== */
+
+    function AdvicePlaque({ tone, icon, children }) {
+      const styles = {
+        ok:      'bg-olive/10 border-olive/30 text-graphite',
+        warn:    'bg-warn/10 border-warn/40 text-graphite',
+        bad:     'bg-danger/10 border-danger/40 text-graphite',
+        neutral: 'bg-sand border-sanddark text-graphitesoft'
+      };
+      const iconColors = { ok: 'text-olive', warn: 'text-warn', bad: 'text-danger', neutral: 'text-graphitesoft' };
+      return (
+        <div className={'flex items-start gap-2 rounded-xl border px-4 py-3 ' + styles[tone]}>
+          <span className={'icon-slot w-4 h-4 mt-0.5 shrink-0 ' + iconColors[tone]}>
+            <Icon name={icon} className="w-4 h-4 block" />
+          </span>
+          <p className="text-sm leading-relaxed">{children}</p>
+        </div>
+      );
+    }
+
+    function AiAdvisor({ profile, income, monthlyLimit, creditPayments }) {
+      const cbr = num(profile.cbrRate);
+      const credits = Array.isArray(profile.credits) ? profile.credits : [];
+      const free = Math.max(income - monthlyLimit - creditPayments, 0);
+
+      const refiCandidates = credits.filter((c) => num(c.rate) > 0 && num(c.rate) > cbr + 3);
+
+      return (
+        <section className="card p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="icon-slot w-5 h-5 text-olive"><Icon name="brain" className="w-5 h-5 block" /></span>
+            <h3 className="font-semibold text-graphite">Умный советник AI (Макро)</h3>
+          </div>
+          <p className="text-xs text-graphitesoft mb-4">
+            Ключевая ставка ЦБ сейчас: <b className="text-graphite">{cbr}%</b> (меняется в настройках)
+          </p>
+
+          <div className="space-y-4">
+            {/* Рефинансирование */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-olive">Рефинансирование</p>
+              {credits.length === 0 ? (
+                <AdvicePlaque tone="neutral" icon="info">
+                  Добавь свои кредиты со ставками в настройках (раздел «Мои кредиты»), и я скажу, когда появится выгода от рефинансирования.
+                </AdvicePlaque>
+              ) : refiCandidates.length > 0 ? (
+                refiCandidates.map((c, i) => {
+                  const save = Math.max(Math.round(num(c.payment) * (num(c.rate) - (cbr + 3)) / num(c.rate)), 0);
+                  return (
+                    <AdvicePlaque key={i} tone="ok" icon="flame">
+                      ВЫГОДНО! Ставка ЦБ ({cbr}%) + 3% ниже твоего кредита «{c.name || 'Без названия'}» ({num(c.rate)}%).
+                      Пора подавать заявку на рефинансирование - это сэкономит примерно {fmt(save)} в месяц.
+                    </AdvicePlaque>
+                  );
+                })
+              ) : cbr >= 15 ? (
+                <AdvicePlaque tone="bad" icon="octagon-alert">
+                  Рефинансирование сейчас СТРОГО ЗАПРЕЩЕНО. Ставки в банках заградительные. Гасите текущие долги по стандартному графику или досрочно.
+                </AdvicePlaque>
+              ) : (
+                <AdvicePlaque tone="neutral" icon="info">
+                  Пока нет кредитов, которые выгодно рефинансировать (ставка ЦБ + 3% не ниже твоих ставок).
+                </AdvicePlaque>
+              )}
+            </div>
+
+            {/* Три кубышки */}
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-olive mb-2">Правило трех кубышек</p>
+              {free <= 0 ? (
+                <AdvicePlaque tone="warn" icon="wallet">
+                  Свободного остатка после лимита на жизнь и обязательных платежей нет. Сначала освободи денежный поток.
+                </AdvicePlaque>
+              ) : (
+                <div className="grid sm:grid-cols-3 gap-3">
+                  <div className="rounded-xl border border-sanddark bg-sand p-4">
+                    <p className="text-sm font-semibold text-graphite">Буфер спонтанных трат</p>
+                    <p className="text-xl font-bold text-olive mt-1">{fmt(free * 0.1)}</p>
+                    <p className="text-xs text-graphitesoft mt-1">10% - живые деньги на форс-мажоры под рукой</p>
+                  </div>
+                  <div className="rounded-xl border border-sanddark bg-sand p-4">
+                    <p className="text-sm font-semibold text-graphite">Долгосрочная цель</p>
+                    <p className="text-xl font-bold text-olive mt-1">{fmt(free * 0.4)}</p>
+                    <p className="text-xs text-graphitesoft mt-1">40% - накопления, которые нельзя трогать</p>
+                  </div>
+                  <div className="rounded-xl border border-sanddark bg-sand p-4">
+                    <p className="text-sm font-semibold text-graphite">Лавина досрочки</p>
+                    <p className="text-xl font-bold text-olive mt-1">{fmt(free * 0.5)}</p>
+                    <p className="text-xs text-graphitesoft mt-1">50% - досрочное гашение самых дорогих долгов</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Вклады */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-olive">Вклады и накопительные счета</p>
+              {cbr >= 15 ? (
+                <AdvicePlaque tone="ok" icon="piggy-bank">
+                  Время сверхдоходных вкладов! Не держите наличные под подушкой. Откройте накопительный счет с ежедневным начислением процентов (банки сейчас дают высокие ставки вслед за ЦБ). Это защитит деньги от инфляции.
+                </AdvicePlaque>
+              ) : cbr < 12 ? (
+                <AdvicePlaque tone="warn" icon="trending-down">
+                  Ставки падают. Рекомендуется зафиксировать доходность, открыв долгосрочный вклад на 1-2 года, пока ставки окончательно не ушли вниз.
+                </AdvicePlaque>
+              ) : (
+                <AdvicePlaque tone="neutral" icon="info">
+                  Ставка в середине диапазона: держите подушку на накопительном счете и следите за решениями ЦБ.
+                </AdvicePlaque>
+              )}
+            </div>
+
+            {/* Инвестиции */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-olive">Куда направить свободный кэш</p>
+              {cbr >= 15 ? (
+                <AdvicePlaque tone="ok" icon="shield">
+                  Накопительные счета и вклады - абсолютно безрисковый инструмент с доходностью уровня ставки ЦБ. Внимание: акции компаний сейчас под давлением из-за дорогого кредитования.
+                </AdvicePlaque>
+              ) : cbr < 12 ? (
+                <AdvicePlaque tone="ok" icon="trending-up">
+                  Ставка низкая - вклады дают мало. Рассмотрите покупку дивидендных акций через брокерский счет и ОФЗ (облигации) для фиксации доходности.
+                </AdvicePlaque>
+              ) : (
+                <AdvicePlaque tone="neutral" icon="scale">
+                  Пограничная зона ставки: сбалансированный подход - часть в вклады, часть в ОФЗ.
+                </AdvicePlaque>
+              )}
+            </div>
+          </div>
+        </section>
+      );
+    }
+
+    /* ===================== AI-ВЕСЫ: БРАТЬ ЛИ КРЕДИТ ===================== */
+
+    function AiScales({ income, creditPayments, cbrRate }) {
+      const [name, setName] = useState('');
+      const [cost, setCost] = useState('');
+      const [months, setMonths] = useState('12');
+      const [rate, setRate] = useState('');
+
+      const effectiveRate = rate === '' ? num(cbrRate) + 4 : num(rate);
+      const P = num(cost);
+      const n = Math.max(parseInt(months, 10) || 0, 0);
+      const r = effectiveRate / 12 / 100;
+
+      let payment = 0;
+      if (P > 0 && n > 0) {
+        if (r > 0) {
+          const pow = Math.pow(1 + r, n);
+          payment = (P * r * pow) / (pow - 1);
+        } else {
+          payment = P / n;
+        }
+      }
+
+      const hasInput = P > 0 && n > 0 && income > 0;
+      const idn = hasInput ? (creditPayments + payment) / income : 0;
+
+      let safety = 0, tone = 'neutral', verdict = '';
+      if (hasInput) {
+        if (idn <= 0.3) {
+          safety = Math.round(85 + ((0.3 - idn) / 0.3) * 15);
+          tone = 'ok';
+          verdict = 'МОЖНО БРАТЬ. Безопасность ' + safety + '%. Платеж комфортно вписывается в бюджет, лимит на жизнь не пострадает.';
+        } else if (idn <= 0.5) {
+          safety = Math.round(50 + ((0.5 - idn) / 0.2) * 30);
+          tone = 'warn';
+          verdict = 'ВЫСОКИЙ РИСК. Безопасность ' + safety + '%. Долговая нагрузка ' + Math.round(idn * 100) + '% дохода - любой форс-мажор собьет график. Лучше подкопить наличными.';
+        } else {
+          safety = Math.max(0, Math.round(40 - (idn - 0.5) * 80));
+          tone = 'bad';
+          verdict = 'НЕ БРАТЬ! Безопасность сделки всего ' + safety + '%. Новый платеж сожрет свободные деньги, вы упретесь в потолок лимитов на жизнь. Отложите покупку или копите наличные в кубышку!';
+        }
+      }
+
+      const barColor = tone === 'ok' ? '#6B7A5A' : tone === 'warn' ? '#C9A227' : tone === 'bad' ? '#B3543F' : '#EAE6DD';
+
+      return (
+        <section className="card p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="icon-slot w-5 h-5 text-olive"><Icon name="scale" className="w-5 h-5 block" /></span>
+            <h3 className="font-semibold text-graphite">AI-Весы: брать ли новый кредит?</h3>
+          </div>
+          <p className="text-xs text-graphitesoft mb-4">
+            Симулятор посчитает ежемесячный платеж и индекс долговой нагрузки (ИДН)
+          </p>
+
+          <div className="grid sm:grid-cols-2 gap-3">
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder="Что покупаем? (Айфон, авто, ипотека)"
+              className="rounded-xl border border-sanddark bg-sand px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+            />
+            <input
+              type="number"
+              min="0"
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
+              placeholder="Сумма кредита, ₽"
+              className="rounded-xl border border-sanddark bg-sand px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+            />
+            <input
+              type="number"
+              min="1"
+              value={months}
+              onChange={(e) => setMonths(e.target.value)}
+              placeholder="Срок, месяцев"
+              className="rounded-xl border border-sanddark bg-sand px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+            />
+            <input
+              type="number"
+              min="0"
+              step="0.1"
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
+              placeholder={'Ставка, % (пусто = ЦБ + 4 = ' + (num(cbrRate) + 4) + '%)'}
+              className="rounded-xl border border-sanddark bg-sand px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+            />
+          </div>
+
+          {hasInput && (
+            <div className="mt-4 fade-in">
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-graphitesoft">
+                  Платеж: <b className="text-graphite">{fmt(payment)}</b>/мес
+                  {name ? ' за «' + name + '»' : ''}
+                </span>
+                <span className="text-graphitesoft">
+                  ИДН: <b className="text-graphite">{Math.round(idn * 100)}%</b>
+                </span>
+              </div>
+              <div className="flex justify-between text-xs text-graphitesoft mb-1">
+                <span>Безопасность сделки</span>
+                <span className="font-bold" style={{ color: barColor }}>{safety}%</span>
+              </div>
+              <div className="w-full h-3 rounded-full bg-sanddark overflow-hidden">
+                <div
+                  className="h-full rounded-full transition-all duration-500"
+                  style={{ width: safety + '%', backgroundColor: barColor }}
+                ></div>
+              </div>
+              <div className="mt-3">
+                <AdvicePlaque tone={tone} icon={tone === 'ok' ? 'circle-check' : tone === 'warn' ? 'triangle-alert' : 'octagon-alert'}>
+                  ВЕРДИКТ: {verdict}
+                </AdvicePlaque>
+              </div>
+            </div>
+          )}
+
+          {!hasInput && (
+            <p className="text-sm text-graphitesoft mt-4">
+              Введи сумму, срок и убедись, что доход указан в настройках - весы сразу взвесят сделку.
+            </p>
+          )}
+        </section>
+      );
+    }
+
+    /* ===================== ТАЙМЛАЙН ЛАВИНА ===================== */
+
+    const DEFAULT_PHASES = [
+      { title: 'ФАЗА 1. Режим выживания', period: 'Ноябрь 2026 - Январь 2027', details: 'Защита грейс-периодов по картам. Крупные праздничные покупки строго через резервную кредитку. Свободный кэш от зарплаты фиксируется наличными.' },
+      { title: 'ФАЗА 2. Ликвидация резервной кредитки', period: 'Февраль - Март 2027', details: 'Все свободные наличные идут на досрочное закрытие праздничного долга. Цель: к концу марта долг = 0 ₽, переплата 0% по грейсу.' },
+      { title: 'ФАЗА 3. Удар по самому дорогому кредиту', period: 'Апрель - Июнь 2027', details: 'Формируем мини-буфер наличных, затем весь свободный поток направляем на досрочное погашение кредита с самой высокой ставкой.' },
+      { title: 'ФАЗА 4. Уничтожение крупного кредита', period: 'Июль 2027 - Март 2028', details: 'Свободный поток растет после закрытия прошлых долгов. Все силы - на досрочное погашение самого крупного кредита. К концу фазы банковские кредиты закрыты в ноль.' },
+      { title: 'ФАЗА 5. Жизнь и отпуск', period: 'Апрель - Июнь 2028', details: 'Банковских долгов больше нет. Обновляем дом и копим на большой отпуск полностью за наличные.' },
+      { title: 'ФАЗА 6. Финальный расчет', period: 'Июль - Октябрь 2028', details: 'Закрываем оставшиеся личные долги. Цель: все долги во Вселенной равны 0 рублей.' },
+      { title: 'ФАЗА 7. Свобода и капитал', period: '2029 - 2034', details: 'Выход в чистые накопления. Крупные цели: земля, дом, образование детей - все за наличные.' }
+    ];
+
+    function Timeline({ phases, setPhases }) {
+      const [openId, setOpenId] = useState(null);
+      const [showForm, setShowForm] = useState(false);
+      const [title, setTitle] = useState('');
+      const [period, setPeriod] = useState('');
+      const [details, setDetails] = useState('');
+
+      function addPhase() {
+        const t = title.trim();
+        if (!t) return;
+        setPhases([...phases, { id: Date.now(), title: t, period: period.trim(), details: details.trim(), done: false }]);
+        setTitle('');
+        setPeriod('');
+        setDetails('');
+        setShowForm(false);
+      }
+
+      function toggleDone(id) {
+        setPhases(phases.map((ph) => (ph.id === id ? { ...ph, done: !ph.done } : ph)));
+      }
+
+      function removePhase(id) {
+        setPhases(phases.filter((ph) => ph.id !== id));
+      }
+
+      function loadTemplate() {
+        setPhases(DEFAULT_PHASES.map((ph, i) => ({ ...ph, id: Date.now() + i, done: false })));
+      }
+
+      const doneCount = phases.filter((ph) => ph.done).length;
+
+      return (
+        <section className="card p-5">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="icon-slot w-5 h-5 text-olive"><Icon name="route" className="w-5 h-5 block" /></span>
+            <h3 className="font-semibold text-graphite">Стратегический таймлайн «Лавина»</h3>
+            <span className="ml-auto text-xs text-graphitesoft">
+              {phases.length > 0 ? 'фаз закрыто: ' + doneCount + ' из ' + phases.length : ''}
+            </span>
+          </div>
+          <p className="text-xs text-graphitesoft mb-4">
+            Твоя долгосрочная дорожная карта. Фазы можно разворачивать, отмечать выполненными и редактировать состав.
+          </p>
+
+          {phases.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-sanddark bg-sand/50 p-5 text-center">
+              <p className="text-sm text-graphitesoft mb-3">
+                Фаз пока нет. Добавь свою первую фазу вручную или загрузи пример-шаблон из 7 фаз и перепиши под себя.
+              </p>
+              <button
+                onClick={loadTemplate}
+                className="rounded-xl border border-olive text-olive text-sm font-semibold px-5 py-2.5 hover:bg-olive hover:text-white transition"
+              >
+                Загрузить пример-шаблон
+              </button>
+            </div>
+          ) : (
+            <ol className="relative border-l-2 border-sanddark ml-3 space-y-4">
+              {phases.map((ph) => (
+                <li key={ph.id} className="pl-5 relative">
+                  <span
+                    className={
+                      'absolute -left-[9px] top-1.5 w-4 h-4 rounded-full border-2 transition ' +
+                      (ph.done ? 'bg-olive border-olive' : 'bg-white border-sanddark')
+                    }
+                  ></span>
+                  <div className={'rounded-xl border px-4 py-3 transition ' + (ph.done ? 'border-olive/30 bg-olive/5' : 'border-sanddark bg-white')}>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => toggleDone(ph.id)}
+                        className={
+                          'w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 transition ' +
+                          (ph.done ? 'bg-olive border-olive text-white' : 'border-sanddark hover:border-olive')
+                        }
+                        title={ph.done ? 'Снять отметку' : 'Фаза выполнена'}
+                      >
+                        {ph.done && <Icon name="check" className="w-3.5 h-3.5 block" />}
+                      </button>
+                      <button
+                        onClick={() => setOpenId(openId === ph.id ? null : ph.id)}
+                        className="flex-1 text-left min-w-0"
+                      >
+                        <p className={'text-sm font-semibold ' + (ph.done ? 'line-through text-graphitesoft' : 'text-graphite')}>
+                          {ph.title}
+                        </p>
+                        {ph.period && <p className="text-xs text-olive mt-0.5">{ph.period}</p>}
+                      </button>
+                      <button
+                        onClick={() => setOpenId(openId === ph.id ? null : ph.id)}
+                        className="p-1.5 rounded-full text-graphitesoft hover:bg-sanddark/50 transition shrink-0"
+                        title={openId === ph.id ? 'Свернуть' : 'Развернуть'}
+                      >
+                        <Icon name={openId === ph.id ? 'chevron-up' : 'chevron-down'} className="w-4 h-4 block" />
+                      </button>
+                      <button
+                        onClick={() => removePhase(ph.id)}
+                        className="p-1.5 rounded-full text-graphitesoft hover:text-danger hover:bg-danger/10 transition shrink-0"
+                        title="Удалить фазу"
+                      >
+                        <Icon name="trash-2" className="w-4 h-4 block" />
+                      </button>
+                    </div>
+                    {openId === ph.id && ph.details && (
+                      <p className="text-sm text-graphitesoft leading-relaxed mt-2 pl-8 fade-in">{ph.details}</p>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
+
+          {phases.length > 0 && (
+            showForm ? (
+              <div className="mt-4 rounded-xl border border-sanddark bg-sand p-4 space-y-3 fade-in">
+                <input
+                  type="text"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Название фазы, например: ФАЗА 1. Режим выживания"
+                  className="w-full rounded-xl border border-sanddark bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                />
+                <input
+                  type="text"
+                  value={period}
+                  onChange={(e) => setPeriod(e.target.value)}
+                  placeholder="Период, например: Ноябрь 2026 - Январь 2027"
+                  className="w-full rounded-xl border border-sanddark bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                />
+                <textarea
+                  value={details}
+                  onChange={(e) => setDetails(e.target.value)}
+                  placeholder="Детали фазы: что делаем, сколько денег, куда направляем"
+                  rows={3}
+                  className="w-full rounded-xl border border-sanddark bg-white px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                ></textarea>
+                <div className="flex gap-2">
+                  <button
+                    onClick={addPhase}
+                    className="rounded-xl bg-olive hover:bg-olivedark text-white text-sm font-semibold px-5 py-2.5 transition"
+                  >
+                    Сохранить фазу
+                  </button>
+                  <button
+                    onClick={() => setShowForm(false)}
+                    className="rounded-xl border border-sanddark text-sm px-5 py-2.5 text-graphitesoft hover:bg-sanddark/40 transition"
+                  >
+                    Отмена
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowForm(true)}
+                className="mt-4 flex items-center gap-2 text-sm font-semibold text-olive hover:text-olivedark transition"
+              >
+                <Icon name="circle-plus" className="w-5 h-5 block" />
+                Добавить фазу
+              </button>
+            )
+          )}
+        </section>
+      );
+    }
+
+    /* ===================== ГЛАВНОЕ ПРИЛОЖЕНИЕ ===================== */
+
+    function App() {
+      const [profile, setProfile] = useState(() => migrateProfile(loadJSON(STORAGE.profile, null)));
+      const [expenses, setExpenses] = useState(() => loadJSON(STORAGE.expenses, []));
+      const [zeroDayDate, setZeroDayDate] = useState(() => loadJSON(STORAGE.zeroDay, null));
+      const [goals, setGoals] = useState(() => loadJSON(STORAGE.goals, []));
+      const [phases, setPhases] = useState(() => loadJSON(STORAGE.phases, []));
+      const [showSettings, setShowSettings] = useState(false);
+
+      const [amount, setAmount] = useState('');
+      const [category, setCategory] = useState('food');
+      const [note, setNote] = useState('');
+      const [isRefund, setIsRefund] = useState(false);
+      const [sourceSel, setSourceSel] = useState('card:0');
+
+      const isOnboarding = profile === null;
+      const p = { ...DEFAULT_PROFILE, ...(profile || {}) };
+      if (!Array.isArray(p.cards)) p.cards = [];
+
+      useEffect(() => {
+        if (profile) localStorage.setItem(STORAGE.profile, JSON.stringify(profile));
+      }, [profile]);
+
+      useEffect(() => {
+        localStorage.setItem(STORAGE.expenses, JSON.stringify(expenses));
+      }, [expenses]);
+
+      useEffect(() => {
+        localStorage.setItem(STORAGE.zeroDay, JSON.stringify(zeroDayDate));
+      }, [zeroDayDate]);
+
+      useEffect(() => {
+        localStorage.setItem(STORAGE.goals, JSON.stringify(goals));
+      }, [goals]);
+
+      useEffect(() => {
+        localStorage.setItem(STORAGE.phases, JSON.stringify(phases));
+      }, [phases]);
+
+      useEffect(() => {
+        if (window.lucide) window.lucide.createIcons();
+      });
+
+      const income = num(p.income);
+      const monthlyLimit = num(p.monthlyLimit);
+      const creditPayments = num(p.creditPayments);
+      const savings = num(p.savings);
+      const cards = p.cards;
+
+      const today = todayStr();
+      const zeroDay = zeroDayDate === today;
+
+      const todayExpenses = useMemo(() => expenses.filter((e) => e.date === today), [expenses, today]);
+      const monthExpenses = useMemo(() => expenses.filter((e) => e.date.startsWith(monthKey())), [expenses]);
+
+      const todaySpent = todayExpenses.reduce((s, e) => s + (e.type === 'refund' ? -e.amount : e.amount), 0);
+      const monthSpent = monthExpenses.reduce((s, e) => s + (e.type === 'refund' ? -e.amount : e.amount), 0);
+      const hasRefundToday = todayExpenses.some((e) => e.type === 'refund');
+
+      const dayTarget = monthlyLimit > 0 ? Math.round(monthlyLimit / daysInMonth()) : 0;
+      const monthRemaining = monthlyLimit - monthSpent;
+      const cashFree = income - monthlyLimit - creditPayments;
+
+      // delta > 0: деньги ушли из источника (долг карты растет, накопления падают)
+      function applyToSource(prof, source, delta) {
+        const next = { ...prof, cards: (Array.isArray(prof.cards) ? prof.cards : []).map((c) => ({ ...c })) };
+        const src = source || 'card:0';
+        if (src.indexOf('card:') === 0) {
+          const i = parseInt(src.slice(5), 10);
+          if (next.cards[i]) next.cards[i].debt = String(Math.max(num(next.cards[i].debt) + delta, 0));
+        } else if (src === 'savings') {
+          next.savings = String(Math.max(num(next.savings) - delta, 0));
+        }
+        return next;
+      }
+
+      function sourceLabel(source) {
+        const src = source || 'card:0';
+        if (src.indexOf('card:') === 0) {
+          const i = parseInt(src.slice(5), 10);
+          const c = (p.cards || [])[i];
+          return c && c.name ? c.name : 'Карта ' + (i + 1);
+        }
+        if (src === 'savings') return 'Накопления';
+        return 'Наличные';
+      }
+
+      function addExpense() {
+        const a = num(amount);
+        if (a <= 0 || zeroDay) return;
+        const entry = {
+          id: Date.now(),
+          date: today,
+          amount: a,
+          category,
+          note: note.trim(),
+          type: isRefund ? 'refund' : 'spend',
+          source: sourceSel
+        };
+        setExpenses([entry, ...expenses]);
+        setProfile(applyToSource(p, sourceSel, isRefund ? -a : a));
+        setAmount('');
+        setNote('');
+        setIsRefund(false);
+      }
+
+      function removeExpense(id) {
+        const victim = expenses.find((e) => e.id === id);
+        if (!victim) return;
+        setExpenses(expenses.filter((e) => e.id !== id));
+        const delta = victim.type === 'refund' ? victim.amount : -victim.amount;
+        setProfile(applyToSource(p, victim.source, delta));
+      }
+
+      function saveSettings(form) {
+        setProfile(migrateProfile(form));
+        setShowSettings(false);
+      }
+
+      function resetAll() {
+        localStorage.removeItem(STORAGE.profile);
+        localStorage.removeItem(STORAGE.expenses);
+        localStorage.removeItem(STORAGE.zeroDay);
+        localStorage.removeItem(STORAGE.goals);
+        localStorage.removeItem(STORAGE.phases);
+        setProfile(null);
+        setExpenses([]);
+        setZeroDayDate(null);
+        setGoals([]);
+        setPhases([]);
+        setShowSettings(false);
+      }
+
+      if (isOnboarding) {
+        return (
+          <SettingsModal
+            profile={p}
+            isOnboarding={true}
+            onSave={saveSettings}
+            onClose={() => {}}
+            onReset={resetAll}
+          />
+        );
+      }
+
+      return (
+        <div className="min-h-screen bg-sand">
+          {/* ШАПКА */}
+          <header className="sticky top-0 z-40 bg-sand/90 backdrop-blur border-b border-sanddark">
+            <div className="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="icon-slot w-7 h-7 text-olive"><Icon name="mountain-snow" className="w-7 h-7 block" /></span>
+                <div>
+                  <h1 className="text-xl font-extrabold tracking-tight">Лавина</h1>
+                  <p className="text-xs text-graphitesoft">Финансовый трекер</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowSettings(true)}
+                className="p-2.5 rounded-full bg-white border border-sanddark hover:bg-sanddark/50 transition"
+                title="Настройки"
+              >
+                <Icon name="settings" className="w-5 h-5 block text-graphite" />
+              </button>
+            </div>
+          </header>
+
+          <main className="max-w-5xl mx-auto px-4 py-6 space-y-6">
+
+            {/* БЛОК: ВЕРДИКТ ФИН-СОВЕТНИКА */}
+            <VerdictBanner todaySpent={todaySpent} dayTarget={dayTarget} hasRefundToday={hasRefundToday} />
+
+            {/* БЛОК: УМНЫЙ СОВЕТ ПО СКОРОСТИ ТРАТ */}
+            <SmartAdvice monthSpent={monthSpent} monthlyLimit={monthlyLimit} />
+
+            {/* БЛОК: ДНЕВНОЙ ЛИМИТ + ВВОД ТРАТ */}
+            <section className="grid md:grid-cols-2 gap-6">
+              <div className="card p-6 relative flex items-center justify-center min-h-[240px]">
+                <DailyRing spent={todaySpent} target={dayTarget} zeroDay={zeroDay} />
+                {zeroDay && (
+                  <p className="absolute bottom-4 left-4 right-4 text-center text-xs text-danger font-medium">
+                    Стальной режим: сегодня 0 ₽
+                  </p>
+                )}
+              </div>
+
+              <div className="card p-6">
+                <h2 className="font-semibold text-graphite mb-4">Добавить трату</h2>
+
+                {zeroDay ? (
+                  <div className="rounded-xl bg-olive/10 border border-olive/30 px-4 py-6 text-center">
+                    <span className="icon-slot w-8 h-8 mx-auto text-olive mb-2 block"><Icon name="shield-check" className="w-8 h-8 block" /></span>
+                    <p className="text-sm font-semibold text-olive">Включен стальной режим экономии.</p>
+                    <p className="text-sm text-graphitesoft mt-1">Копим кубышку на лавинное гашение! Форма разблокируется завтра.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <input
+                      type="number"
+                      min="0"
+                      value={amount}
+                      onChange={(e) => setAmount(e.target.value)}
+                      placeholder="Сумма, ₽"
+                      className="w-full rounded-xl border border-sanddark bg-sand px-4 py-3 text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-olive/40"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      {CATEGORIES.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => setCategory(c.id)}
+                          className={
+                            'flex items-center gap-1.5 px-3 py-2 rounded-full text-sm border transition ' +
+                            (category === c.id
+                              ? 'bg-olive text-white border-olive'
+                              : 'bg-white border-sanddark text-graphitesoft hover:border-olive/50')
+                          }
+                        >
+                          <Icon name={c.icon} className="w-4 h-4 block" />
+                          {c.label}
+                        </button>
+                      ))}
+                    </div>
+                    <input
+                      type="text"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Комментарий (необязательно)"
+                      className="w-full rounded-xl border border-sanddark bg-sand px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-olive/40"
+                    />
+                    <div>
+                      <label className="block text-xs text-graphitesoft mb-1">Откуда списать?</label>
+                      <select
+                        value={sourceSel}
+                        onChange={(e) => setSourceSel(e.target.value)}
+                        className="w-full rounded-xl border border-sanddark bg-sand px-4 py-2.5 text-sm text-graphite focus:outline-none focus:ring-2 focus:ring-olive/40"
+                      >
+                        {cards.map((c, i) => (
+                          <option key={i} value={'card:' + i}>
+                            {'С карты: ' + (c.name || 'Карта ' + (i + 1))}
+                          </option>
+                        ))}
+                        <option value="savings">Из накоплений</option>
+                        <option value="cash">Из наличных (кубышка)</option>
+                      </select>
+                    </div>
+                    <label className="flex items-center gap-2.5 cursor-pointer select-none">
+                      <button
+                        type="button"
+                        onClick={() => setIsRefund(!isRefund)}
+                        className={
+                          'w-10 h-6 rounded-full relative transition ' +
+                          (isRefund ? 'bg-olive' : 'bg-sanddark')
+                        }
+                        title="Включи, если это возврат денег на карту"
+                      >
+                        <span
+                          className={
+                            'absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ' +
+                            (isRefund ? 'left-5' : 'left-1')
+                          }
+                        ></span>
+                      </button>
+                      <span className="text-sm text-graphitesoft">
+                        Это возврат денег {isRefund && <b className="text-olive">(вернется в выбранный источник)</b>}
+                      </span>
+                    </label>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={addExpense}
+                        className={
+                          'flex-1 rounded-xl text-white font-semibold py-3 transition ' +
+                          (isRefund ? 'bg-graphite hover:bg-graphitesoft' : 'bg-olive hover:bg-olivedark')
+                        }
+                      >
+                        {isRefund ? 'Внести возврат' : 'Добавить трату'}
+                      </button>
+                      <button
+                        onClick={() => setZeroDayDate(today)}
+                        className="rounded-xl border-2 border-graphite/20 px-4 py-3 text-sm font-semibold text-graphite hover:border-danger hover:text-danger transition"
+                        title="Зафиксировать день без трат"
+                      >
+                        День 0 ₽
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="mt-4 pt-4 border-t border-sanddark flex items-center justify-between">
+                  <span className="text-sm text-graphitesoft">Остаток лимита на месяц</span>
+                  <span className={'text-lg font-bold ' + (monthRemaining < 0 ? 'text-danger' : 'text-graphite')}>
+                    {fmt(monthRemaining)}
+                  </span>
+                </div>
+                <p className="text-xs text-graphitesoft mt-1">из {fmt(monthlyLimit)} на {monthLabel()}</p>
+              </div>
+            </section>
+
+            {/* БЛОК: ЧТО ДЕЛАЕМ ЗАВТРА */}
+            <TomorrowPlan todaySpent={todaySpent} dayTarget={dayTarget} zeroDay={zeroDay} />
+
+            {/* БЛОК: ЛЕНТА ТРАТ ЗА ДЕНЬ */}
+            <section className="card p-5">
+              <div className="flex items-center gap-2 mb-3">
+                <span className="icon-slot w-5 h-5 text-olive"><Icon name="receipt" className="w-5 h-5 block" /></span>
+                <h3 className="font-semibold text-graphite">Траты сегодня</h3>
+                <span className="ml-auto text-sm text-graphitesoft">Итого: <b className="text-graphite">{fmt(todaySpent)}</b></span>
+              </div>
+              {todayExpenses.length === 0 ? (
+                <p className="text-sm text-graphitesoft py-2">Сегодня трат пока нет. Так держать!</p>
+              ) : (
+                <ul className="divide-y divide-sanddark">
+                  {todayExpenses.map((e) => {
+                    const cat = CATEGORIES.find((c) => c.id === e.category) || CATEGORIES[CATEGORIES.length - 1];
+                    const refund = e.type === 'refund';
+                    return (
+                      <li key={e.id} className="flex items-center gap-3 py-2.5">
+                        <span className={'icon-slot w-8 h-8 rounded-full flex items-center justify-center shrink-0 ' + (refund ? 'bg-olive/15 text-olive' : 'bg-sand text-olive')}>
+                          <Icon name={refund ? 'undo-2' : cat.icon} className="w-4 h-4 block mx-auto my-auto" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-graphite">
+                            {refund ? 'Возврат: ' + cat.label : cat.label}
+                          </p>
+                          <p className="text-xs text-graphitesoft truncate">
+                            {refund ? 'на: ' : 'с: '}{sourceLabel(e.source)}{e.note ? ' · ' + e.note : ''}
+                          </p>
+                        </div>
+                        <span className={'ml-auto font-semibold whitespace-nowrap ' + (refund ? 'text-olive' : 'text-graphite')}>
+                          {refund ? '+' : ''}{fmt(e.amount)}
+                        </span>
+                        <button
+                          onClick={() => removeExpense(e.id)}
+                          className="p-1.5 rounded-full text-graphitesoft hover:text-danger hover:bg-danger/10 transition"
+                          title="Удалить трату"
+                        >
+                          <Icon name="trash-2" className="w-4 h-4 block" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </section>
+
+            {/* БЛОК: АНАЛИТИКА ЗА МЕСЯЦ */}
+            <Analytics expenses={expenses} monthlyLimit={monthlyLimit} />
+
+            {/* БЛОК: МОИ ФИНАНСОВЫЕ ЦЕЛИ */}
+            <Goals goals={goals} setGoals={setGoals} />
+
+            {/* БЛОК: КАРТЫ И КЭШ */}
+            <section>
+              <h2 className="text-lg font-bold text-graphite mb-3">Тактический контроль</h2>
+              <div className="grid md:grid-cols-3 gap-4">
+                {cards.map((c, i) => (
+                  <BankCard
+                    key={i}
+                    title={c.name || 'Карта ' + (i + 1)}
+                    icon="credit-card"
+                    debt={num(c.debt)}
+                    limit={num(c.limit)}
+                    accent={i % 2 === 0 ? '#6B7A5A' : '#8FA3B8'}
+                    extra={c.status || (i === 0 ? 'Не забывай про грейс-период следующего месяца.' : '')}
+                  />
+                ))}
+                <div className="card p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="icon-slot w-5 h-5 text-olive"><Icon name="piggy-bank" className="w-5 h-5 block" /></span>
+                    <h3 className="font-semibold text-graphite">Накопления</h3>
+                  </div>
+                  <span className="text-2xl font-bold">{fmt(savings)}</span>
+                  <p className="text-sm text-graphitesoft mt-2 leading-relaxed">
+                    Свободные накопления на сегодня. Траты «из накоплений» уменьшают эту сумму.
+                  </p>
+                </div>
+                <div className="card p-5">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="icon-slot w-5 h-5 text-olive"><Icon name="banknote" className="w-5 h-5 block" /></span>
+                    <h3 className="font-semibold text-graphite">Кэш в кубышке</h3>
+                  </div>
+                  <span className="text-2xl font-bold">{fmt(Math.max(cashFree, 0))}</span>
+                  <p className="text-sm text-graphitesoft mt-2 leading-relaxed">
+                    Доход минус лимит на жизнь и обязательные платежи.
+                  </p>
+                  <p className="text-xs text-olive mt-2">Снять в день зарплаты и запереть под замок.</p>
+                </div>
+              </div>
+            </section>
+
+            {/* БЛОК: АЧИВКИ */}
+            <Achievements expenses={expenses} zeroDay={zeroDay} todaySpent={todaySpent} />
+
+            {/* БЛОК: AI-СОВЕТНИК (МАКРО) */}
+            <AiAdvisor profile={p} income={income} monthlyLimit={monthlyLimit} creditPayments={creditPayments} />
+
+            {/* БЛОК: AI-ВЕСЫ */}
+            <AiScales income={income} creditPayments={creditPayments} cbrRate={p.cbrRate} />
+
+            {/* БЛОК: ТАЙМЛАЙН ЛАВИНА */}
+            <Timeline phases={phases} setPhases={setPhases} />
+
+            <footer className="text-center text-xs text-graphitesoft pt-4 pb-8">
+              Лавина - все данные хранятся локально на твоем устройстве
+            </footer>
+          </main>
+
+          {showSettings && (
+            <SettingsModal
+              profile={p}
+              isOnboarding={false}
+              onSave={saveSettings}
+              onClose={() => setShowSettings(false)}
+              onReset={resetAll}
+            />
+          )}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+
+  <!-- Запуск: вручную компилируем JSX в классический режим (React.createElement), чтобы не требовались ES-модули -->
+  <script>
+    (function () {
+      var srcTag = document.getElementById('app-source');
+      if (!srcTag || typeof Babel === 'undefined') {
+        document.getElementById('root').innerHTML =
+          '<div style="padding:40px;text-align:center;color:#B3543F;font-family:sans-serif">' +
+          'Не удалось загрузить библиотеки. Проверь подключение к интернету и обнови страницу.</div>';
+        return;
+      }
+      try {
+        var compiled = Babel.transform(srcTag.textContent, {
+          presets: [['react', { runtime: 'classic' }]]
+        }).code;
+        var s = document.createElement('script');
+        s.textContent = compiled;
+        document.body.appendChild(s);
+      } catch (e) {
+        document.getElementById('root').innerHTML =
+          '<div style="padding:40px;text-align:center;color:#B3543F;font-family:sans-serif">' +
+          'Ошибка запуска приложения: ' + e.message + '</div>';
+      }
+    })();
+  </script>
+</body>
+</html>
